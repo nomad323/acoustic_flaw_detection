@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from os import path
 from time import perf_counter
 from typing import Any
 
-from filename_matrix import generate_filename_matrix
 from experiment_common import (
     apply_shallow_mask,
     build_imaging_config,
@@ -14,43 +12,41 @@ from experiment_common import (
 )
 from flaw_detection import MlDetectionConfig, RuleDetectionConfig, defects_to_dicts, detect_flaws
 from flaw_visualize import draw_defect_overlays
-from my_read import my_read
+from my_read2_new import my_read2_new
 
 
 def build_read_settings() -> dict[str, Any]:
-    """读取多文件矩阵数据所需的参数。"""
+    """读取单 MAT 文件（含全部通道）所需参数。"""
     return {
-        "data_dir": r"D:\tanshang\sbts_new",  # 多通道 MAT 文件所在目录
-        "n": 8,  # 阵列每边阵元数（文件矩阵尺寸 n×n）
-        "t": 2000,  # 每条 A 扫最多读取的样本点
-        "variable_name": "voltage",  # MAT 文件内信号变量名
-        "max_samples": 10000,  # 单通道原始读取上限（与 t 共同约束）
+        "data_file": r"D:\tanshang\sbts_new\data.mat",  # 单 MAT 数据文件路径
+        "m": 1,  # 读取的数据块数（取第 1 块）
+        "n": 8,  # 阵列每边阵元数
+        "t": 10000,  # 时间窗上限 1
+        "t1": 3734,  # 时间窗上限 2（与 t 共同约束）
     }
 
 
 def load_data(settings: dict[str, Any]):
-    """按 n×n 文件名矩阵读取 A 扫数据，返回形状 (n, n, T)。"""
-    n = settings["n"]  # 阵列规模
-    names = generate_filename_matrix(n, n, suffix=".mat")  # 文件名矩阵（如 00.mat ~ 77.mat）
-    files = [[path.join(settings["data_dir"], f) for f in row] for row in names]  # 绝对路径矩阵
-    return my_read(
-        files=files,
+    """从 4D 数据中取第一块，返回形状 (n, n, T)。"""
+    data_4d = my_read2_new(  # 读取结果形状约为 (m, n, n, T)
+        settings["data_file"],
         t=settings["t"],
-        n=n,
-        variable_name=settings["variable_name"],
-        max_samples=settings["max_samples"],
+        t1=settings["t1"],
+        m=settings["m"],
+        n=settings["n"],
     )
+    return data_4d[0]  # 取第一个块作为成像输入
 
 
 def build_geometry_settings(n: int) -> dict[str, float]:
-    """构建与阵列几何和声学常量相关的参数。"""
-    l0 = 1e-3  # 相邻阵元中心间距 (m)
-    c = 6451.9  # 声速 (m/s)
-    t0 = 1e-8  # 采样时间间隔 (s)
-    detector_diameter = 6e-3  # 阵元有效直径 (m)
+    """构建与 sbts_new 实验对应的几何和物理参数。"""
+    l0 = 0.5e-3  # 相邻阵元中心间距 (m)
+    c = 6427.0  # 声速 (m/s)
     f0 = 5e6  # 中心频率 (Hz)
-    d = 0.01584  # 发射阵列与接收阵列间隙 (m)
-    x2 = 0.013  # 接收阵列起始参考位置 (m)
+    t0 = 5e-9  # 采样时间间隔 (s)
+    detector_diameter = 6e-3  # 阵元有效直径 (m)
+    d = 15.84e-3  # 发射与接收阵列间隙 (m)
+    x2 = 40e-3  # 接收阵列起始参考位置 (m)
     return {
         "l0": l0,  # 阵元间距 (m)
         "c": c,  # 声速 (m/s)
@@ -68,7 +64,7 @@ def build_preprocess_settings() -> tuple[bool, dict[str, Any]]:
     """返回预处理开关及参数。"""
     return True, {
         "center_freq_hz": 5e6,  # 带通中心频率 (Hz)
-        "bandwidth_hz": 2e6,  # 带通带宽 (Hz)
+        "bandwidth_hz": 4e6,  # 带通带宽 (Hz)
         "remove_dc": True,  # 是否去直流分量
         "mute_front_samples": 140,  # 前部静音样本数
         "subtract_common_mode": True,  # 是否减公共模式
@@ -93,18 +89,18 @@ def build_imaging_settings(detector_diameter: float, use_shallow_mask: bool) -> 
         "fan_origin_x": None,  # 扇形原点 x（None 为自动）
         "fan_origin_y": 0.0,  # 扇形原点 y (m)
         "beam_model": "none",  # 波束模型
-        "aperture_apodization": "none",  # 孔径加窗方式
         "piston_diameter": detector_diameter,  # 活塞模型阵元直径 (m)
-        "attenuation_db_per_m": 5,  # 衰减系数 (dB/m)(5-20 for Al, 10-50 for 碳钢, 30-100 for 不锈钢)
+        "attenuation_db_per_m": 0.5,  # 衰减系数 (dB/m)
         "piston_use_abs": True,  # 活塞方向图是否取绝对值
-        "piston_min_gain": 0,  # 活塞增益下限
+        "piston_min_gain": 0.25,  # 活塞增益下限
+        "aperture_apodization": "none",  # 孔径加窗方式
         "legacy_use_abs": True,  # 旧模型增益是否取绝对值
-        "legacy_min_gain": 0,  # 旧模型增益下限
-        "mgb_angle_c": 3,  # MGB 角度修正系数
-        "coherence_mode": "cf",  # 相干加权模式->这个非常有用
-        "coherence_gamma": 2,  # 相干加权指数
-        "reduction_mode": " gated_max",  # 轨迹聚合模式->别用max,这个才正常
-        "gate_center_idx": 15,  # 门控中心索引
+        "legacy_min_gain": 0.8,  # 旧模型增益下限
+        "mgb_angle_c": 0.0,  # MGB 角度修正系数
+        "coherence_mode": "cf",  # 相干加权模式
+        "coherence_gamma": 0,  # 相干加权指数
+        "reduction_mode": "gated_max",  # 轨迹聚合模式
+        "gate_center_idx": 20,  # 门控中心索引
         "gate_half_width": 15,  # 门控半宽
         "sensitivity_comp": True,  # 是否做灵敏度补偿
     }
@@ -113,7 +109,7 @@ def build_imaging_settings(detector_diameter: float, use_shallow_mask: bool) -> 
 def build_detection_settings() -> dict[str, Any]:
     """构建缺陷识别配置参数。"""
     return {
-        "mode": "rule",  # 识别模式：rule | ml
+        "mode": "ml",  # 识别模式：rule | ml
         "rule_cfg": RuleDetectionConfig(
             smooth_sigma=1.0,
             threshold_strategy="otsu",
@@ -122,14 +118,14 @@ def build_detection_settings() -> dict[str, Any]:
             morph_open_px=1,
             morph_close_px=2,
             fill_holes=True,
-            ignore_top_mm=6.0,
+            ignore_top_mm=8.0,
             max_results=20,
             max_area_ratio=0.25,
             reject_border_touch=True,
             border_margin_px=1,
             min_score=0.05,
             dedupe_iou_threshold=0.25,
-            dedupe_center_dist_mm=1.0,
+            dedupe_center_dist_mm=2.0,
         ),
         "ml_cfg": MlDetectionConfig(
             backend="ultralytics_sam",
@@ -137,7 +133,7 @@ def build_detection_settings() -> dict[str, Any]:
             conf_threshold=0.25,
             iou_threshold=0.7,
             min_area_mm2=1.0,
-            ignore_top_mm=6.0,
+            ignore_top_mm=8.0,
             fallback_to_rule=True,
             max_results=20,
             max_area_ratio=0.20,
@@ -145,7 +141,7 @@ def build_detection_settings() -> dict[str, Any]:
             border_margin_px=1,
             min_score=0.15,
             dedupe_iou_threshold=0.25,
-            dedupe_center_dist_mm=1.0,
+            dedupe_center_dist_mm=2.0,
         ),
     }
 
@@ -182,7 +178,7 @@ def main() -> None:
 
     # 3) 成像配置、重建与可视化
     use_shallow_mask = True  # 是否在显示时遮蔽浅层区域
-    shallow_mask_mm = 6.0  # 浅层遮蔽厚度 (mm)
+    shallow_mask_mm = 8.0  # 浅层遮蔽厚度 (mm)
     imaging_settings = build_imaging_settings(  # 成像重建配置
         detector_diameter=geometry["detector_diameter"],
         use_shallow_mask=use_shallow_mask,
@@ -218,7 +214,7 @@ def main() -> None:
         ml_cfg=detection_settings["ml_cfg"],
     )
     defect_dicts = defects_to_dicts(defects)  # 识别结果（可序列化）
-    print_defect_summary(defect_dicts, prefix="experiment")
+    print_defect_summary(defect_dicts, prefix="experiment_new")
     draw_defect_overlays(
         image=final_image,
         defects=defects,
@@ -234,7 +230,7 @@ def main() -> None:
             shallow_mask_mm=shallow_mask_mm,
             title="Normalized Imaging Result (Shallow Masked)",
         )
-    print(f"[experiment] total runtime: {perf_counter() - t_start:.2f}s")
+    print(f"[experiment_new] total runtime: {perf_counter() - t_start:.2f}s")
 
 
 if __name__ == "__main__":

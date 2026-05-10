@@ -5,7 +5,7 @@ import numpy as np
 # Fast default basis for first-pass MGB correction.
 # These are practical starting coefficients and can be tuned later.
 DEFAULT_MGB_A = np.array([0.42, 0.33, 0.18, 0.07], dtype=np.float64)
-DEFAULT_MGB_B = np.array([2200.0, 7800.0, 18000.0, 36000.0], dtype=np.float64)*1.5
+DEFAULT_MGB_B = np.array([2200.0, 7800.0, 18000.0, 36000.0], dtype=np.float64)*0.000000000001
 
 
 def default_mgb_coefficients() -> tuple[np.ndarray, np.ndarray]:

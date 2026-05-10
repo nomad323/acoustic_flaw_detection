@@ -51,7 +51,7 @@ def my_read(
     t: int,
     n: int | None = None,
     max_samples: int = 40000,
-    variable_name: str = "C1_data",
+    variable_name: str = "voltage",
 ) -> np.ndarray:
     """
     Read a matrix of MAT files and stack into shape (n, n, samples).
