@@ -40,3 +40,6 @@ assets/
 
 # Corrupted/binary requirements file
 python/requirements.txt
+
+# opencode AI agent instructions
+AGENTS.md
