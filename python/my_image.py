@@ -7,7 +7,7 @@ from time import perf_counter
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.signal import butter, lfilter
+from scipy.signal import butter, hilbert, lfilter
 
 from mgb import default_mgb_coefficients, validate_mgb_coefficients
 
@@ -223,7 +223,7 @@ def _compute_z_numba(
             angle = abs(math.atan2(px - fan_origin_x, dy))
             if angle > fan_half_angle_rad:
                 continue
-        result = np.zeros(subset_len, dtype=np.float64)
+        result = np.zeros(subset_len, dtype=data.dtype)
         energy = np.zeros(subset_len, dtype=np.float64)
         counts = np.zeros(subset_len, dtype=np.float64)
         sens_denom = 0.0
@@ -276,7 +276,7 @@ def _compute_z_numba(
                         contrib = data[i, j, src_idx] * inv_k * pair_w
                         result[t] += contrib
                         if use_cf:
-                            energy[t] += contrib * contrib
+                            energy[t] += contrib.real * contrib.real + contrib.imag * contrib.imag
                             counts[t] += 1.0
 
         abs_trace = np.zeros(subset_len, dtype=np.float64)
@@ -288,7 +288,8 @@ def _compute_z_numba(
             val *= sens_scale
             if use_cf:
                 denom = counts[t] * energy[t] + 1e-12
-                cf = (result[t] * result[t]) / denom if denom > 0.0 else 0.0
+                num = result[t].real * result[t].real + result[t].imag * result[t].imag
+                cf = num / denom if denom > 0.0 else 0.0
                 if cf < 0.0:
                     cf = 0.0
                 val *= math.pow(cf, coherence_gamma)
@@ -329,7 +330,7 @@ class ImagingConfig:
     legacy_use_abs: bool = True
     legacy_min_gain: float = 0.8
     mgb_angle_c: float = 0.0
-    coherence_mode: str = "none"  # none | cf
+    coherence_mode: str = "none"  # none | cf | cf_hilbert
     coherence_gamma: float = 1.0
     reduction_mode: str = "max"  # max | rms | gated_max
     gate_center_idx: int = 0
@@ -451,9 +452,12 @@ def my_image(
         raise ValueError("gate_center_idx must be >= 0.")
 
     coherence_mode = coherence_mode.lower().strip()
-    if coherence_mode not in {"none", "cf"}:
-        raise ValueError("coherence_mode must be 'none' or 'cf'.")
+    if coherence_mode not in {"none", "cf", "cf_hilbert"}:
+        raise ValueError("coherence_mode must be 'none', 'cf', or 'cf_hilbert'.")
     use_cf = coherence_mode == "cf"
+    use_cf_hilbert = coherence_mode == "cf_hilbert"
+    if use_cf_hilbert:
+        data = hilbert(data, axis=2)
     reduction_mode = reduction_mode.lower().strip()
     if reduction_mode not in {"max", "rms", "gated_max"}:
         raise ValueError("reduction_mode must be 'max', 'rms', or 'gated_max'.")
@@ -548,7 +552,7 @@ def my_image(
             mgb_a,
             mgb_b,
             mgb_angle_c,
-            use_cf,
+            use_cf or use_cf_hilbert,
             coherence_gamma,
             reduction_mode_code,
             gate_center_idx,
@@ -578,7 +582,7 @@ def my_image(
                     if angle > fan_half_angle_rad:
                         continue
 
-                result = np.zeros(subset_len, dtype=np.float64)
+                result = np.zeros(subset_len, dtype=data.dtype)
                 energy = np.zeros(subset_len, dtype=np.float64)
                 counts = np.zeros(subset_len, dtype=np.float64)
                 sens_denom = 0.0
@@ -637,8 +641,8 @@ def my_image(
                             if 0 <= src_idx < data.shape[2]:
                                 contrib = data[i, j, src_idx] * inv_k * pair_w
                                 result[t] += contrib
-                                if use_cf:
-                                    energy[t] += contrib * contrib
+                                if use_cf or use_cf_hilbert:
+                                    energy[t] += contrib.real * contrib.real + contrib.imag * contrib.imag
                                     counts[t] += 1.0
                 if apply_filter and filter_coeffs is not None:
                     b, a_filter = filter_coeffs
@@ -646,9 +650,10 @@ def my_image(
                 abs_eval = np.abs(result)
                 if sensitivity_comp and sens_denom > 0.0:
                     abs_eval = abs_eval / np.sqrt(sens_denom)
-                if use_cf:
+                if use_cf or use_cf_hilbert:
                     denom = counts * energy + 1e-12
-                    cf = np.where(denom > 0.0, (result * result) / denom, 0.0)
+                    result_sq_mag = result.real * result.real + result.imag * result.imag
+                    cf = np.where(denom > 0.0, result_sq_mag / denom, 0.0)
                     cf = np.clip(cf, 0.0, 1.0)
                     abs_eval = abs_eval * np.power(cf, coherence_gamma)
 

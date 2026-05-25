@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from os import path
 from time import perf_counter
 from typing import Any
 
@@ -8,6 +9,8 @@ from experiment_common import (
     build_imaging_config,
     maybe_preprocess_data,
     reconstruct_image,
+    save_raw_reconstruction_image,
+    save_shallow_masked_image,
     show_shallow_masked_image,
 )
 from flaw_detection import MlDetectionConfig, RuleDetectionConfig, defects_to_dicts, detect_flaws
@@ -146,11 +149,19 @@ def build_detection_settings() -> dict[str, Any]:
     }
 
 
-def print_defect_summary(defects: list[dict[str, Any]], prefix: str) -> None:
+def print_defect_summary(defects: list[dict[str, Any]], prefix: str, total_depth_mm: float | None = None) -> None:
     print(f"[{prefix}] defects found: {len(defects)}")
     for idx, item in enumerate(defects, start=1):
+        cy = item['centroid_y_mm']
+        ymin = item['bbox_y_min_mm']
+        ymax = item['bbox_y_max_mm']
+        if total_depth_mm is not None:
+            cy = total_depth_mm - cy
+            ymin_new = total_depth_mm - ymax
+            ymax_new = total_depth_mm - ymin
+            ymin, ymax = ymin_new, ymax_new
         print(
-            f"[{prefix}] #{idx}: center=({item['centroid_x_mm']:.2f}mm,{item['centroid_y_mm']:.2f}mm), "
+            f"[{prefix}] #{idx}: center=({item['centroid_x_mm']:.2f}mm,{cy:.2f}mm), "
             f"area={item['area_mm2']:.2f}mm2, d_eq={item['equivalent_diameter_mm']:.2f}mm, "
             f"r={item['inscribed_radius_mm']:.2f}mm, r_out={item['enclosing_radius_mm']:.2f}mm, "
             f"bbox=({item['bbox_w_mm']:.2f}mm,{item['bbox_h_mm']:.2f}mm), "
@@ -214,7 +225,8 @@ def main() -> None:
         ml_cfg=detection_settings["ml_cfg"],
     )
     defect_dicts = defects_to_dicts(defects)  # 识别结果（可序列化）
-    print_defect_summary(defect_dicts, prefix="experiment_new")
+    total_depth_mm = image.shape[1] * pixel_size_mm
+    print_defect_summary(defect_dicts, prefix="experiment_new", total_depth_mm=total_depth_mm)
     draw_defect_overlays(
         image=final_image,
         defects=defects,
@@ -230,6 +242,32 @@ def main() -> None:
             shallow_mask_mm=shallow_mask_mm,
             title="Normalized Imaging Result (Shallow Masked)",
         )
+
+    # --- saveplot: 将图像保存到原始数据目录 ---
+    out_dir = path.dirname(read_settings["data_file"])
+    save_raw_reconstruction_image(
+        image=image,
+        title="Normalized Imaging Result",
+        save_path=path.join(out_dir, "experiment_new_image.png"),
+    )
+    draw_defect_overlays(
+        image=final_image,
+        defects=defects,
+        pixel_size_mm=pixel_size_mm,
+        title=f"Flaw Detection Overlay ({detection_settings['mode']})",
+        save_path=path.join(out_dir, "experiment_new_overlay.png"),
+        show=False,
+    )
+    if use_shallow_mask:
+        save_shallow_masked_image(
+            image=image,
+            delta=config.delta,
+            shallow_mask_mm=shallow_mask_mm,
+            title="Normalized Imaging Result (Shallow Masked)",
+            save_path=path.join(out_dir, "experiment_new_shallow_masked.png"),
+        )
+    # -------------------------------------------------
+
     print(f"[experiment_new] total runtime: {perf_counter() - t_start:.2f}s")
 
 

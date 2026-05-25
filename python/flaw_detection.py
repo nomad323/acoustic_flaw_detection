@@ -184,7 +184,7 @@ def _results_from_masks(
         area_px = int(np.count_nonzero(comp))
         if area_px <= 0:
             continue
-        # 过滤“包住整图”的伪目标（常见于超声散射背景）。
+        # 过滤"包住整图"的伪目标（常见于超声散射背景）。
         if max_area_ratio > 0 and (area_px / total_area_px) > max_area_ratio:
             continue
         if reject_border_touch:

@@ -10,6 +10,8 @@ from experiment_common import (
     build_imaging_config,
     maybe_preprocess_data,
     reconstruct_image,
+    save_raw_reconstruction_image,
+    save_shallow_masked_image,
     show_shallow_masked_image,
 )
 from flaw_detection import MlDetectionConfig, RuleDetectionConfig, defects_to_dicts, detect_flaws
@@ -20,7 +22,7 @@ from my_read import my_read
 def build_read_settings() -> dict[str, Any]:
     """读取多文件矩阵数据所需的参数。"""
     return {
-        "data_dir": r"D:\tanshang\sbts_new",  # 多通道 MAT 文件所在目录
+        "data_dir": r"/mnt/d/tanshang/sbts_new",  # 多通道 MAT 文件所在目录
         "n": 8,  # 阵列每边阵元数（文件矩阵尺寸 n×n）
         "t": 2000,  # 每条 A 扫最多读取的样本点
         "variable_name": "voltage",  # MAT 文件内信号变量名
@@ -50,7 +52,7 @@ def build_geometry_settings(n: int) -> dict[str, float]:
     detector_diameter = 6e-3  # 阵元有效直径 (m)
     f0 = 5e6  # 中心频率 (Hz)
     d = 0.01584  # 发射阵列与接收阵列间隙 (m)
-    x2 = 0.013  # 接收阵列起始参考位置 (m)
+    x2 = 0.018  # 接收阵列起始参考位置 (m)
     return {
         "l0": l0,  # 阵元间距 (m)
         "c": c,  # 声速 (m/s)
@@ -79,7 +81,7 @@ def build_preprocess_settings() -> tuple[bool, dict[str, Any]]:
 def build_imaging_settings(detector_diameter: float, use_shallow_mask: bool) -> dict[str, Any]:
     """构建重建与显示相关的配置参数。"""
     return {
-        "delta": 1e-3,  # 成像网格步长 (m)
+        "delta": 1e-4,  # 成像网格步长 (m)
         "length": 100e-3,  # 成像区域长度 (m)
         "width": 60e-3,  # 成像区域宽度 (m)
         "subset_len": 600,  # 每条 A 扫参与重建样本数
@@ -89,7 +91,7 @@ def build_imaging_settings(detector_diameter: float, use_shallow_mask: bool) -> 
         "apply_filter": False,  # 是否在成像内部做带通滤波
         "use_numba": True,  # 是否启用 Numba 加速
         "use_fan_mask": True,  # 是否启用扇形掩膜
-        "fan_half_angle_deg": 90.0,  # 扇形半角 (deg)
+        "fan_half_angle_deg": 40.0,  # 扇形半角 (deg)
         "fan_origin_x": None,  # 扇形原点 x（None 为自动）
         "fan_origin_y": 0.0,  # 扇形原点 y (m)
         "beam_model": "none",  # 波束模型
@@ -101,7 +103,7 @@ def build_imaging_settings(detector_diameter: float, use_shallow_mask: bool) -> 
         "legacy_use_abs": True,  # 旧模型增益是否取绝对值
         "legacy_min_gain": 0,  # 旧模型增益下限
         "mgb_angle_c": 3,  # MGB 角度修正系数
-        "coherence_mode": "cf",  # 相干加权模式->这个非常有用
+        "coherence_mode": "cf_hilbert",  # 相干加权模式->这个非常有用
         "coherence_gamma": 2,  # 相干加权指数
         "reduction_mode": " gated_max",  # 轨迹聚合模式->别用max,这个才正常
         "gate_center_idx": 15,  # 门控中心索引
@@ -113,7 +115,7 @@ def build_imaging_settings(detector_diameter: float, use_shallow_mask: bool) -> 
 def build_detection_settings() -> dict[str, Any]:
     """构建缺陷识别配置参数。"""
     return {
-        "mode": "rule",  # 识别模式：rule | ml
+        "mode": "ml",  # 识别模式：rule | ml
         "rule_cfg": RuleDetectionConfig(
             smooth_sigma=1.0,
             threshold_strategy="otsu",
@@ -127,7 +129,7 @@ def build_detection_settings() -> dict[str, Any]:
             max_area_ratio=0.25,
             reject_border_touch=True,
             border_margin_px=1,
-            min_score=0.05,
+            min_score=0.15,
             dedupe_iou_threshold=0.25,
             dedupe_center_dist_mm=1.0,
         ),
@@ -136,25 +138,33 @@ def build_detection_settings() -> dict[str, Any]:
             model_name="sam_b.pt",
             conf_threshold=0.25,
             iou_threshold=0.7,
-            min_area_mm2=1.0,
+            min_area_mm2=0.5,
             ignore_top_mm=6.0,
             fallback_to_rule=True,
             max_results=20,
             max_area_ratio=0.20,
             reject_border_touch=True,
             border_margin_px=1,
-            min_score=0.15,
+            min_score=0.1,
             dedupe_iou_threshold=0.25,
             dedupe_center_dist_mm=1.0,
         ),
     }
 
 
-def print_defect_summary(defects: list[dict[str, Any]], prefix: str) -> None:
+def print_defect_summary(defects: list[dict[str, Any]], prefix: str, total_depth_mm: float | None = None) -> None:
     print(f"[{prefix}] defects found: {len(defects)}")
     for idx, item in enumerate(defects, start=1):
+        cy = item['centroid_y_mm']
+        ymin = item['bbox_y_min_mm']
+        ymax = item['bbox_y_max_mm']
+        if total_depth_mm is not None:
+            cy = total_depth_mm - cy
+            ymin_new = total_depth_mm - ymax
+            ymax_new = total_depth_mm - ymin
+            ymin, ymax = ymin_new, ymax_new
         print(
-            f"[{prefix}] #{idx}: center=({item['centroid_x_mm']:.2f}mm,{item['centroid_y_mm']:.2f}mm), "
+            f"[{prefix}] #{idx}: center=({item['centroid_x_mm']:.2f}mm,{cy:.2f}mm), "
             f"area={item['area_mm2']:.2f}mm2, d_eq={item['equivalent_diameter_mm']:.2f}mm, "
             f"r={item['inscribed_radius_mm']:.2f}mm, r_out={item['enclosing_radius_mm']:.2f}mm, "
             f"bbox=({item['bbox_w_mm']:.2f}mm,{item['bbox_h_mm']:.2f}mm), "
@@ -218,7 +228,8 @@ def main() -> None:
         ml_cfg=detection_settings["ml_cfg"],
     )
     defect_dicts = defects_to_dicts(defects)  # 识别结果（可序列化）
-    print_defect_summary(defect_dicts, prefix="experiment")
+    total_depth_mm = image.shape[1] * pixel_size_mm
+    print_defect_summary(defect_dicts, prefix="experiment", total_depth_mm=total_depth_mm)
     draw_defect_overlays(
         image=final_image,
         defects=defects,
@@ -234,6 +245,32 @@ def main() -> None:
             shallow_mask_mm=shallow_mask_mm,
             title="Normalized Imaging Result (Shallow Masked)",
         )
+
+    # --- saveplot: 将图像保存到原始数据目录 ---
+    out_dir = read_settings["data_dir"]
+    save_raw_reconstruction_image(
+        image=image,
+        title="Normalized Imaging Result",
+        save_path=path.join(out_dir, "experiment_image.png"),
+    )
+    draw_defect_overlays(
+        image=final_image,
+        defects=defects,
+        pixel_size_mm=pixel_size_mm,
+        title=f"Flaw Detection Overlay ({detection_settings['mode']})",
+        save_path=path.join(out_dir, "experiment_overlay.png"),
+        show=False,
+    )
+    if use_shallow_mask:
+        save_shallow_masked_image(
+            image=image,
+            delta=config.delta,
+            shallow_mask_mm=shallow_mask_mm,
+            title="Normalized Imaging Result (Shallow Masked)",
+            save_path=path.join(out_dir, "experiment_shallow_masked.png"),
+        )
+    # -------------------------------------------------
+
     print(f"[experiment] total runtime: {perf_counter() - t_start:.2f}s")
 
 

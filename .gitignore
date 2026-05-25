@@ -1,4 +1,42 @@
+# Python
 __pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.pytest_cache/
+.tox/
+
+# Virtual environment
 .venv/
+venv/
+.env
+
+# IDE
 .vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
 sam_b.pt
+*.pptx
+opencode.json
+memory/
+
+# Evolver internal state
+assets/
+
+# opencode tool configuration
+.opencode/
+
+# Corrupted/binary requirements file
+python/requirements.txt

@@ -139,3 +139,34 @@ def show_shallow_masked_image(
     plt.colorbar()
     plt.title(title)
     plt.show()
+
+
+def save_shallow_masked_image(
+    image: np.ndarray,
+    delta: float,
+    shallow_mask_mm: float,
+    title: str,
+    save_path: str,
+) -> None:
+    masked_image = apply_shallow_mask(image=image, delta=delta, shallow_mask_mm=shallow_mask_mm)
+    display_img = np.flipud(masked_image.T)
+    plt.figure()
+    plt.imshow(display_img, origin="lower", aspect="equal", cmap="turbo")
+    plt.colorbar()
+    plt.title(title)
+    plt.savefig(save_path, dpi=200, bbox_inches="tight")
+    plt.close()
+
+
+def save_raw_reconstruction_image(
+    image: np.ndarray,
+    title: str,
+    save_path: str,
+) -> None:
+    display_img = np.flipud(image.T)
+    plt.figure()
+    plt.imshow(display_img, origin="lower", aspect="equal", cmap="turbo")
+    plt.colorbar()
+    plt.title(title)
+    plt.savefig(save_path, dpi=200, bbox_inches="tight")
+    plt.close()
